@@ -1,0 +1,151 @@
+"""
+CHATBOT PROJECT – READ WORD FILE & QA (NO API KEY)
+
+Steps (in very simple language):
+--------------------------------
+1. Install required libraries (check if already installed):
+   - python-docx (to read Word file)
+   - langchain (for splitting text into chunks)
+   - sentence-transformers (to create embeddings)
+   - faiss-cpu (to store embeddings and search)
+   - transformers (to load local LLM like Flan-T5)
+   - torch (backend for transformers)
+   - numpy (for array operations)
+
+2. Read Word file → extract text.
+
+3. Split text into small chunks → easier for embeddings.
+
+4. Convert chunks into embeddings → numerical representation of text.
+
+5. Store embeddings in FAISS index → so chatbot can find relevant text quickly.
+
+6. Take user query → embed → find most relevant chunks.
+
+7. Send context + query to Flan-T5 → generate answer.
+
+8. Print answer → repeat until user says "bye".
+
+NOTE: Each step has print statements to confirm it’s working.
+"""
+
+# -----------------------------
+# Step 0: Install missing libraries
+# -----------------------------
+import importlib
+import subprocess
+import sys
+
+def install_if_missing(package, import_name=None):
+    if import_name is None:
+        import_name = package
+    try:
+        importlib.import_module(import_name)
+        print(f"✅ {package} already installed")
+    except ImportError:
+        print(f"📦 Installing {package}...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# Required libraries
+install_if_missing("python-docx", "docx")
+install_if_missing("langchain")
+install_if_missing("sentence-transformers", "sentence_transformers")
+install_if_missing("faiss-cpu", "faiss")
+install_if_missing("transformers")
+install_if_missing("torch")
+install_if_missing("numpy")
+
+# -----------------------------
+# Step 1: Read Word file
+# -----------------------------
+from docx import Document
+
+def read_word(file_path):
+    text = ""
+    doc = Document(file_path)
+    for para in doc.paragraphs:
+        if para.text.strip():
+            text += para.text + "\n"
+    return text
+
+word_path = r"E:\Downloads\GEN AI\Sagar Kasture Initial Resume.docx"
+word_text = read_word(word_path)
+print("\n✅ Step 1: Word file loaded. Preview:\n", word_text[:300])
+
+# -----------------------------
+# Step 2: Split into chunks
+# -----------------------------
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=50
+)
+chunks = text_splitter.split_text(word_text)
+print(f"\n✅ Step 2: Split into {len(chunks)} chunks. First chunk:\n", chunks[0])
+
+# -----------------------------
+# Step 3: Create embeddings
+# -----------------------------
+from sentence_transformers import SentenceTransformer
+import numpy as np
+import faiss
+
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+embeddings = embedding_model.encode(chunks, show_progress_bar=True)
+print("\n✅ Step 3: Embeddings created with shape:", embeddings.shape)
+
+# -----------------------------
+# Step 4: Store in FAISS
+# -----------------------------
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatL2(dimension)
+index.add(np.array(embeddings))
+print("✅ Step 4: Stored in FAISS index")
+
+# -----------------------------
+# Step 5: Setup Chat Model
+# -----------------------------
+from transformers import pipeline
+generator = pipeline("text2text-generation", model="google/flan-t5-large")
+
+print("\n✅ Step 5: Chatbot ready! Ask me questions about your Word file.\n")
+
+# -----------------------------
+# Step 6: Chat Loop
+# -----------------------------
+while True:
+    query = input("You: ")
+    if query.lower() == "bye":
+        print("🤖 Chatbot: Goodbye 👋")
+        break
+
+    # Retrieve top 3 chunks
+    query_vector = embedding_model.encode([query])
+    D, I = index.search(np.array(query_vector), k=3)
+    context = " ".join([chunks[i] for i in I[0]])
+
+    # Create strong prompt
+    prompt = f"""
+    You are an AI assistant. 
+    Your job is to answer the user’s question using ONLY the information in the context. 
+    Do not use outside knowledge. 
+    If the answer is not in the context, say "I couldn’t find that in the PDF."
+
+    Context:
+    {context}
+
+    Question:
+    {query}
+
+    Answer:
+    """
+
+    # Generate answer
+    response = generator(prompt, max_new_tokens=200)[0]["generated_text"]
+
+    print("🤖 Chatbot:", response)
+
+# -----------------------------
+# END OF SCRIPT
+# -----------------------------
