@@ -1,0 +1,32 @@
+Step 1
+pip install transformers torch
+
+Step 2
+#RUN BELOW CODE
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+model_name = "microsoft/DialoGPT-small"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name)
+
+print("🤖 Chatbot: Hi! Type 'bye' to exit.")
+
+while True:
+    user_input = input("You: ")
+    if user_input.lower() == "bye":
+        print("🤖 Chatbot: Goodbye 👋")
+        break
+
+    # Encode input with attention_mask
+    inputs = tokenizer(user_input + tokenizer.eos_token, return_tensors="pt")
+
+    # Generate reply
+    reply_ids = model.generate(
+        **inputs,
+        max_length=200,
+        pad_token_id=tokenizer.eos_token_id
+    )
+
+    reply = tokenizer.decode(reply_ids[:, inputs["input_ids"].shape[-1]:][0], skip_special_tokens=True)
+    print("🤖 Chatbot:", reply)
