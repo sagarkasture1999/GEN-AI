@@ -1,1 +1,60 @@
+# Proj to read from PDF
 
+# install all and store pdf in -- E:\Downloads\GEN AI -- with name Sagar_resume
+pip install PyPDF2
+pip install sentence-transformers
+pip install faiss-cpu
+pip install numpy
+
+# Run below code
+
+import PyPDF2
+from sentence_transformers import SentenceTransformer
+import faiss
+import numpy as np
+
+# -----------------------
+# Step 1: Load PDF
+# -----------------------
+def read_pdf(file_path):
+    text = ""
+    with open(file_path, "rb") as f:
+        reader = PyPDF2.PdfReader(f)
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+    return text
+
+pdf_path = r"E:\Downloads\GEN AI\Sagar_resume.PDF"  # 👈 your resume path
+pdf_text = read_pdf(pdf_path)
+
+# Split text into chunks (small pieces)
+chunks = pdf_text.split("\n")
+
+# -----------------------
+# Step 2: Embeddings
+# -----------------------
+model = SentenceTransformer('all-MiniLM-L6-v2')
+embeddings = model.encode(chunks)
+
+# Create FAISS index
+dimension = embeddings.shape[1]
+index = faiss.IndexFlatL2(dimension)
+index.add(np.array(embeddings))
+
+# -----------------------
+# Step 3: Chatbot loop
+# -----------------------
+print("🤖 Resume Chatbot Ready! Type 'bye' to exit.")
+
+while True:
+    query = input("You: ")
+    if query.lower() == "bye":
+        print("🤖 Chatbot: Goodbye 👋")
+        break
+
+    # Encode query
+    query_vector = model.encode([query])
+    D, I = index.search(np.array(query_vector), k=1)  # top 1 match
+    answer = chunks[I[0][0]]
+    
+    print("🤖 Chatbot:", answer)
