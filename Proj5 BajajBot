@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Local Multi-PDF Q&A Chatbot (Fixed Paths)
+- Reads 2 specific PDFs from folder
+- Builds FAISS index
+- Lets you chat without entering paths
+"""
+
+# ====== Helper: Auto-install ======
+import importlib, subprocess, sys, os
+
+def ensure_package(pkg_name, import_name=None, pip_name=None):
+    mod = import_name or pkg_name
+    pip_pkg = pip_name or pkg_name
+    try:
+        importlib.import_module(mod)
+        print(f"✅ '{pip_pkg}' already installed.")
+    except ImportError:
+        print(f"⏳ Installing '{pip_pkg}' ...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pip_pkg])
+        importlib.invalidate_caches()
+
+# Required libs
+ensure_package("PyPDF2")
+ensure_package("langchain")
+ensure_package("sentence_transformers", import_name="sentence_transformers", pip_name="sentence-transformers")
+ensure_package("faiss", import_name="faiss", pip_name="faiss-cpu")
+ensure_package("transformers")
+ensure_package("torch")
+ensure_package("numpy")
+
+# ====== Imports ======
+from PyPDF2 import PdfReader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
+import numpy as np, faiss
+from transformers import pipeline
+
+# ====== File paths (fixed) ======
+PDF_FILES = [
+    r"E:\Downloads\GEN AI\Earnings Call Transcript FY26 - Q1.pdf",
+    r"E:\Downloads\GEN AI\Bajaj Finserv Investor Presentation - FY2025-26 - Q1.pdf"
+]
+
+# ====== 1. Read PDFs ======
+def read_pdfs(file_paths):
+    all_texts = []
+    for file_path in file_paths:
+        if not os.path.isfile(file_path):
+            print(f"❌ File not found: {file_path}")
+            continue
+        print(f"\n📄 Reading {file_path} ...")
+        reader = PdfReader(file_path)
+        texts = []
+        for page in reader.pages:
+            texts.append(page.extract_text() or "")
+        text = "\n".join(texts).strip()
+        print(f"✅ Extracted {len(text):,} chars from {len(reader.pages)} pages.")
+        all_texts.append(text)
+    return "\n".join(all_texts)
+
+# ====== 2. Chunk ======
+def chunk_text(text, size=500, overlap=50):
+    splitter = RecursiveCharacterTextSplitter(chunk_size=size, chunk_overlap=overlap)
+    chunks = splitter.split_text(text)
+    print(f"🧩 Created {len(chunks)} chunks.")
+    return chunks
+
+# ====== 3. Embeddings + FAISS ======
+def build_index(chunks):
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+    print("🚀 Encoding chunks ...")
+    embeddings = model.encode(chunks, convert_to_numpy=True, show_progress_bar=True)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
+    index.add(embeddings)
+    print(f"📦 FAISS index with {index.ntotal} vectors.")
+    return index, model
+
+# ====== 4. Chat ======
+def chat_loop(chunks, index, model):
+    try:
+        generator = pipeline("text2text-generation", model="google/flan-t5-large")
+    except:
+        generator = pipeline("text2text-generation", model="google/flan-t5-base")
+
+    print("\n🤖 Chatbot ready! Ask questions (type 'bye' to quit).")
+    while True:
+        q = input("\n🟢 You: ").strip()
+        if q.lower() in {"bye", "exit", "quit"}:
+            print("👋 Bye!"); break
+
+        q_vec = model.encode(q, convert_to_numpy=True).astype("float32")
+        D, I = index.search(np.expand_dims(q_vec, 0), 3)
+        retrieved = [chunks[i] for i in I[0] if i >= 0]
+
+        context = "\n\n---\n\n".join(retrieved)
+        prompt = f"Context:\n{context}\n\nQuestion: {q}\nAnswer:"
+        out = generator(prompt, max_new_tokens=256, temperature=0.2)
+        print(f"\n🤖 Bot: {out[0]['generated_text'].strip()}")
+
+# ====== Main ======
+if __name__ == "__main__":
+    text = read_pdfs(PDF_FILES)
+    chunks = chunk_text(text)
+    index, model = build_index(chunks)
+    chat_loop(chunks, index, model)
